@@ -6,72 +6,10 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/group_switcher_bottom_sheet.dart';
 import '../../auth/presentation/auth_cubit.dart';
 import '../../auth/presentation/auth_state.dart';
+import '../../auth/presentation/widgets/edit_profile_bottom_sheet.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
-
-  void _showEditNameDialog(BuildContext context, String currentName) {
-    final controller = TextEditingController(text: currentName);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.edit_rounded, color: AppColors.primary, size: 22),
-            SizedBox(width: 10),
-            Text('تعديل اسم الطالب', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'أدخل اسمك ثلاثي كما تحب أن يظهر لمعلمك وفي نتائج الامتحانات:',
-              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'الاسم الكامل',
-                hintText: 'مثال: أحمد محمد علي',
-                filled: true,
-                fillColor: AppColors.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.black),
-            onPressed: () async {
-              final newName = controller.text.trim();
-              if (newName.isNotEmpty) {
-                Navigator.pop(ctx);
-                await context.read<AuthCubit>().updateProfileName(newName);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('تم تحديث اسمك بنجاح'), backgroundColor: AppColors.green),
-                  );
-                }
-              }
-            },
-            child: const Text('حفظ التعديل', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,39 +25,42 @@ class DashboardScreen extends StatelessWidget {
 
         return Scaffold(
           appBar: AppBar(
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.person_rounded, size: 18, color: AppColors.primary),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    profile.fullName.isNotEmpty ? profile.fullName : 'طالب',
-                    style: AppTextStyles.titleMedium.copyWith(fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                InkWell(
-                  onTap: () => _showEditNameDialog(context, profile.fullName),
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(6),
+            title: InkWell(
+              onTap: () => EditProfileBottomSheet.show(context, profile),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.person_rounded, size: 18, color: AppColors.primary),
                     ),
-                    child: const Icon(Icons.edit_rounded, size: 12, color: AppColors.textSecondary),
-                  ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        profile.fullName.isNotEmpty ? profile.fullName : 'طالب',
+                        style: AppTextStyles.titleMedium.copyWith(fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(Icons.edit_rounded, size: 12, color: AppColors.textSecondary),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
             actions: [
               // Standalone Group / Account Switcher Icon
@@ -309,20 +250,67 @@ class DashboardScreen extends StatelessWidget {
                         ],
 
                         const SizedBox(height: 14),
+                        const Divider(height: 1, color: AppColors.border),
+                        const SizedBox(height: 10),
                         Row(
                           children: [
-                            const Icon(Icons.phone_outlined, size: 14, color: AppColors.textSecondary),
-                            const SizedBox(width: 6),
-                            Text('هاتفك: ${profile.phone}', style: AppTextStyles.bodySmall),
-                            const Spacer(),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.phone_android_rounded, size: 13, color: AppColors.textSecondary),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'هاتفك: ${profile.phone.isNotEmpty ? profile.phone : "غير مسجل"}',
+                                        style: AppTextStyles.bodySmall.copyWith(fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.contact_phone_outlined, size: 13, color: AppColors.textSecondary),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'ولي الأمر: ${profile.parentPhone.isNotEmpty ? profile.parentPhone : "غير مسجل"}',
+                                        style: AppTextStyles.bodySmall.copyWith(fontSize: 11, color: AppColors.textSecondary),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
                             InkWell(
-                              onTap: () => context.push('/join-group'),
-                              child: Text(
-                                '➕ إضافة معلم / مجموعة أخرى',
-                                style: AppTextStyles.bodySmall.copyWith(color: AppColors.primary, fontWeight: FontWeight.bold),
+                              onTap: () => EditProfileBottomSheet.show(context, profile),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.edit_rounded, size: 12, color: AppColors.primary),
+                                    SizedBox(width: 4),
+                                    Text('تعديل البيانات', style: TextStyle(fontSize: 11, color: AppColors.primary, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 10),
+                        InkWell(
+                          onTap: () => context.push('/join-group'),
+                          child: Text(
+                            '➕ إضافة معلم / مجموعة أخرى',
+                            style: AppTextStyles.bodySmall.copyWith(color: AppColors.primary, fontWeight: FontWeight.bold),
+                          ),
                         ),
                       ],
                     ),

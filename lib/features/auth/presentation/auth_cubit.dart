@@ -169,6 +169,31 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
+  Future<void> updateProfile({
+    required String fullName,
+    required String phone,
+    required String parentPhone,
+  }) async {
+    final previousState = state;
+    emit(AuthLoading());
+    try {
+      final updatedProfile = await _authRepository.updateProfile(
+        fullName: fullName,
+        phone: phone,
+        parentPhone: parentPhone,
+      );
+      if (updatedProfile.isProfileComplete) {
+        await _saveOfflineProfile(updatedProfile);
+      }
+      emit(Authenticated(updatedProfile));
+    } catch (e) {
+      emit(AuthError(e.toString()));
+      if (previousState is Authenticated) {
+        emit(previousState);
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> joinGroup(String code) async {
     try {
       final res = await _authRepository.joinGroupByCode(code);

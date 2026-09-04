@@ -16,6 +16,7 @@ abstract class AuthRepository {
   Future<StudentProfileModel> signUpWithEmail({required String email, required String password});
   Future<StudentProfileModel> completeProfile({required String fullName, required String phone, required String parentPhone});
   Future<StudentProfileModel> updateProfileName(String newName);
+  Future<StudentProfileModel> updateProfile({required String fullName, required String phone, required String parentPhone});
   Future<Map<String, dynamic>> joinGroupByCode(String code);
   Future<void> setActiveGrade(String gradeId);
   Future<void> signOut();
@@ -911,6 +912,94 @@ class AuthRepositoryImpl implements AuthRepository {
           );
     } catch (e) {
       throw ServerException('فشل تعديل الاسم: $e');
+    }
+  }
+
+  @override
+  Future<StudentProfileModel> updateProfile({
+    required String fullName,
+    required String phone,
+    required String parentPhone,
+  }) async {
+    final user = _client.auth.currentUser;
+    if (user == null) throw const AppAuthException('المستخدم غير مسجل');
+
+    final cleanName = fullName.trim();
+    final cleanPhoneStr = phone.trim();
+    final cleanParentPhoneStr = parentPhone.trim();
+
+    if (cleanName.isEmpty) throw const ServerException('يرجى إدخال اسم الطالب');
+    if (cleanPhoneStr.isEmpty) throw const ServerException('يرجى إدخال رقم هاتف الطالب');
+    if (cleanParentPhoneStr.isEmpty) throw const ServerException('يرجى إدخال رقم هاتف ولي الأمر');
+
+    try {
+      // 1. Update auth.users metadata
+      try {
+        await _client.auth.updateUser(
+          UserAttributes(
+            data: {
+              'name': cleanName,
+              'full_name': cleanName,
+              'phone': cleanPhoneStr,
+              'parent_phone': cleanParentPhoneStr,
+            },
+          ),
+        );
+      } catch (authErr) {
+        debugPrint('[updateProfile] auth.updateUser note: $authErr');
+      }
+
+      // 2. Update profiles table
+      try {
+        await _client.from('profiles').upsert({
+          'id': user.id,
+          'name': cleanName,
+          'phone': cleanPhoneStr,
+          'parent_phone': cleanParentPhoneStr,
+          'email': user.email,
+          'role': 'student',
+        });
+      } catch (profileErr) {
+        debugPrint('[updateProfile] profiles upsert note: $profileErr');
+      }
+
+      // 3. Update all student rows in students table
+      try {
+        final existingStudents = await _client
+            .from('students')
+            .select('id')
+            .or('profile_id.eq.${user.id},user_id.eq.${user.id}');
+
+        for (final s in (existingStudents as List<dynamic>)) {
+          await _client.from('students').update({
+            'name': cleanName,
+            'phone': cleanPhoneStr,
+            'parent_phone': cleanParentPhoneStr,
+            'status': 'active',
+          }).eq('id', s['id']);
+        }
+      } catch (studentErr) {
+        debugPrint('[updateProfile] students update note: $studentErr');
+      }
+
+      // 4. Invalidate and refresh cached profile
+      final updated = await getStudentProfile();
+      if (updated != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cached_student_profile_${user.id}', jsonEncode(updated.toJson()));
+        return updated;
+      }
+
+      return StudentProfileModel(
+        id: '',
+        userId: user.id,
+        fullName: cleanName,
+        phone: cleanPhoneStr,
+        parentPhone: cleanParentPhoneStr,
+      );
+    } catch (e) {
+      debugPrint('[updateProfile] Error: $e');
+      throw ServerException('فشل حفظ وتحديث البيانات: $e');
     }
   }
 
