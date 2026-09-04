@@ -430,7 +430,7 @@ class AuthRepositoryImpl implements AuthRepository {
         await _client.auth.signInWithOAuth(
           OAuthProvider.google,
           redirectTo: redirectUrl,
-          authScreenLaunchMode: LaunchMode.externalApplication,
+          authScreenLaunchMode: LaunchMode.platformDefault,
         );
       }
 
