@@ -11,6 +11,7 @@ abstract class ExamsRepository {
   Future<List<ExamQuestionModel>> getExamQuestions(String examId);
   Future<ExamResultModel> submitExamAttempt({required String examId, required List<Map<String, dynamic>> answers});
   Future<List<Map<String, dynamic>>> getMyAttempts(String studentId);
+  Future<void> deleteAttempt(Map<String, dynamic> attempt);
   Future<List<ExamModel>> getOfflineExams(String gradeId);
   Future<bool> isExamDownloaded(String examId);
   Future<void> downloadExamForOffline(ExamModel exam);
@@ -342,6 +343,7 @@ class ExamsRepositoryImpl implements ExamsRepository {
         breakdown.add({
           'question_id': qId,
           'question_text': qText,
+          'options': options,
           'selected_option': studentDisplay,
           'selected_letter': studentLetter ?? '',
           'correct_answer': correctDisplay,
@@ -538,7 +540,6 @@ class ExamsRepositoryImpl implements ExamsRepository {
   @override
   Future<List<Map<String, dynamic>>> getMyAttempts(String studentId) async {
     final List<Map<String, dynamic>> combined = [];
-    final Set<String> seenKeys = {};
 
     // 1. Fetch remote attempts from Supabase
     try {
@@ -576,24 +577,76 @@ class ExamsRepositoryImpl implements ExamsRepository {
 
       for (final item in res) {
         final map = Map<String, dynamic>.from(item as Map);
-        final key = '${map['exam_id']}_${map['submitted_at'] ?? map['started_at']}';
-        seenKeys.add(key);
-        combined.add(map);
+        final id = map['id']?.toString() ?? '';
+        final examId = map['exam_id']?.toString() ?? '';
+        final timeStr = map['submitted_at']?.toString() ?? map['started_at']?.toString() ?? '';
+
+        bool isDuplicate = false;
+        for (final existing in combined) {
+          if (id.isNotEmpty && existing['id']?.toString() == id) {
+            isDuplicate = true;
+            break;
+          }
+          final exExamId = existing['exam_id']?.toString() ?? '';
+          final exTimeStr = existing['submitted_at']?.toString() ?? existing['started_at']?.toString() ?? '';
+          if (exExamId == examId && timeStr.isNotEmpty && exTimeStr.isNotEmpty) {
+            final t1 = DateTime.tryParse(timeStr);
+            final t2 = DateTime.tryParse(exTimeStr);
+            if (t1 != null && t2 != null && (t1.difference(t2).inSeconds).abs() < 60) {
+              isDuplicate = true;
+              break;
+            }
+          }
+        }
+
+        if (!isDuplicate) {
+          combined.add(map);
+        }
       }
     } catch (e) {
       debugPrint('[getMyAttempts] Supabase remote query error: $e');
     }
 
-    // 2. Merge local cached attempts
+    // 2. Merge local cached attempts ONLY if not already in combined
     try {
       final prefs = await SharedPreferences.getInstance();
       final localList = prefs.getStringList('local_student_exam_attempts') ?? [];
       for (final raw in localList) {
         try {
           final map = jsonDecode(raw) as Map<String, dynamic>;
-          final key = '${map['exam_id']}_${map['submitted_at'] ?? map['started_at']}';
-          if (!seenKeys.contains(key)) {
-            seenKeys.add(key);
+          final id = map['id']?.toString() ?? '';
+          final examId = map['exam_id']?.toString() ?? '';
+          final timeStr = map['submitted_at']?.toString() ?? map['started_at']?.toString() ?? '';
+
+          bool isAlreadyPresent = false;
+          for (final existing in combined) {
+            if (id.isNotEmpty && existing['id']?.toString() == id) {
+              isAlreadyPresent = true;
+              break;
+            }
+            final exExamId = existing['exam_id']?.toString() ?? '';
+            final exTimeStr = existing['submitted_at']?.toString() ?? existing['started_at']?.toString() ?? '';
+            if (exExamId == examId) {
+              if (timeStr.isEmpty || exTimeStr.isEmpty) {
+                isAlreadyPresent = true;
+                break;
+              }
+              final t1 = DateTime.tryParse(timeStr);
+              final t2 = DateTime.tryParse(exTimeStr);
+              if (t1 != null && t2 != null && (t1.difference(t2).inSeconds).abs() < 180) {
+                // If existing remote attempt doesn't have breakdown but local does, enrich existing!
+                if ((existing['breakdown'] == null || existing['breakdown'] is! List || (existing['breakdown'] as List).isEmpty) &&
+                    map['breakdown'] != null) {
+                  existing['breakdown'] = map['breakdown'];
+                  existing['answers'] = map['answers'];
+                }
+                isAlreadyPresent = true;
+                break;
+              }
+            }
+          }
+
+          if (!isAlreadyPresent) {
             combined.add(map);
           }
         } catch (_) {}
@@ -610,6 +663,64 @@ class ExamsRepositoryImpl implements ExamsRepository {
     });
 
     return combined;
+  }
+
+  @override
+  Future<void> deleteAttempt(Map<String, dynamic> attempt) async {
+    final attemptId = attempt['id']?.toString() ?? '';
+    final examId = attempt['exam_id']?.toString() ?? '';
+    final submittedAt = attempt['submitted_at']?.toString() ?? attempt['started_at']?.toString();
+
+    // 1. Delete from Supabase if online
+    if (attemptId.isNotEmpty && !attemptId.startsWith('local_')) {
+      try {
+        await _client.from('exam_attempts').delete().eq('id', attemptId);
+        debugPrint('[deleteAttempt] Deleted from Supabase by id $attemptId');
+      } catch (e) {
+        debugPrint('[deleteAttempt] Supabase delete by id error: $e');
+      }
+    }
+
+    final user = _client.auth.currentUser;
+    if (user != null && examId.isNotEmpty && submittedAt != null) {
+      try {
+        await _client
+            .from('exam_attempts')
+            .delete()
+            .eq('exam_id', examId)
+            .eq('submitted_at', submittedAt);
+      } catch (_) {}
+    }
+
+    // 2. Delete from local cache SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final localList = prefs.getStringList('local_student_exam_attempts') ?? [];
+      final updatedList = localList.where((raw) {
+        try {
+          final map = jsonDecode(raw) as Map<String, dynamic>;
+          final mId = map['id']?.toString() ?? '';
+          if (attemptId.isNotEmpty && mId == attemptId) return false;
+          final mExamId = map['exam_id']?.toString() ?? '';
+          final mTime = map['submitted_at']?.toString() ?? map['started_at']?.toString();
+          if (mExamId == examId && mTime != null && submittedAt != null) {
+            final t1 = DateTime.tryParse(mTime);
+            final t2 = DateTime.tryParse(submittedAt);
+            if (t1 != null && t2 != null && (t1.difference(t2).inSeconds).abs() < 10) {
+              return false;
+            }
+          }
+          return true;
+        } catch (_) {
+          return true;
+        }
+      }).toList();
+
+      await prefs.setStringList('local_student_exam_attempts', updatedList);
+      debugPrint('[deleteAttempt] Deleted attempt locally.');
+    } catch (e) {
+      debugPrint('[deleteAttempt] Local delete error: $e');
+    }
   }
 
   @override

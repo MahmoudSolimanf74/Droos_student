@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_pdfview/flutter_pdfview.dart';
+import 'package:pdfrx/pdfrx.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -22,69 +24,93 @@ class PdfViewerScreen extends StatefulWidget {
 }
 
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
+  final PdfViewerController _controller = PdfViewerController();
   String? _localFilePath;
   bool _isLoading = true;
   String? _errorMessage;
   int _totalPages = 0;
-  int _currentPage = 0;
+  int _currentPage = 1;
 
   @override
   void initState() {
     super.initState();
-    _downloadAndOpen();
+    _initPdf();
   }
 
-  Future<void> _downloadAndOpen() async {
-    final cubit = context.read<CurriculumCubit>();
-    final fileName = widget.title.endsWith('.pdf') ? widget.title : '${widget.title}.pdf';
-
+  Future<void> _initPdf() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
+    // If Web, we can directly load via URL or let pdfrx load URI
+    if (kIsWeb) {
+      setState(() {
+        _localFilePath = null;
+        _isLoading = false;
+      });
+      return;
+    }
+
+    // On Native (Mobile / Desktop): Check local file or cache
+    final cubit = context.read<CurriculumCubit>();
+    final fileName = widget.title.endsWith('.pdf') ? widget.title : '${widget.title}.pdf';
+
     try {
-      // 1. If already a direct local file path
+      String? rawPath;
+
+      // 1. Direct local path passed in url
       if (!widget.url.startsWith('http://') && !widget.url.startsWith('https://')) {
         final localF = File(widget.url);
         if (await localF.exists() && await localF.length() > 0) {
-          if (mounted) {
-            setState(() {
-              _localFilePath = widget.url;
-              _isLoading = false;
-            });
-            return;
-          }
+          rawPath = widget.url;
         }
       }
 
-      // 2. Check if already cached in offline directory
-      final cachedPath = await cubit.getLocalFilePath(fileName);
-      if (cachedPath != null) {
-        final cachedF = File(cachedPath);
-        if (await cachedF.exists() && await cachedF.length() > 0) {
-          if (mounted) {
-            setState(() {
-              _localFilePath = cachedPath;
-              _isLoading = false;
-            });
-            return;
-          }
+      // 2. Check local offline cache
+      if (rawPath == null) {
+        final cached = await cubit.getLocalFilePath(fileName);
+        if (cached != null && await File(cached).exists() && (await File(cached).length() > 0)) {
+          rawPath = cached;
         }
       }
 
-      // 3. If online, download from network
-      final path = await cubit.downloadFile(widget.url, fileName);
-      if (mounted) {
+      // 3. Download if online URL
+      if (rawPath == null &&
+          (widget.url.startsWith('http://') || widget.url.startsWith('https://'))) {
+        rawPath = await cubit.downloadFile(widget.url, fileName);
+      }
+
+      if (rawPath != null && mounted) {
+        final sourceFile = File(rawPath);
+        final tempDir = await getTemporaryDirectory();
+        final safeName = 'doc_${fileName.hashCode.abs()}.pdf';
+        final safeFile = File('${tempDir.path}/$safeName');
+
+        if (!await safeFile.exists() || (await safeFile.length()) != (await sourceFile.length())) {
+          await sourceFile.copy(safeFile.path);
+        }
+
         setState(() {
-          _localFilePath = path;
+          _localFilePath = safeFile.path;
+          _isLoading = false;
+        });
+      } else if (widget.url.startsWith('http://') || widget.url.startsWith('https://')) {
+        // Fallback: Use direct remote URI if local copy failed
+        setState(() {
+          _localFilePath = null;
+          _isLoading = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _errorMessage = 'تعذر العثور على ملف الـ PDF أو تحميله.';
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'عفواً، يرجى الاتصال بالإنترنت لتحميل هذا الملف لأول مرة';
+          _errorMessage = 'حدث خطأ أثناء إعداد الملف: $e';
           _isLoading = false;
         });
       }
@@ -94,34 +120,25 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text(widget.title, style: AppTextStyles.titleMedium),
+        title: Text(widget.title, style: AppTextStyles.titleSmall.copyWith(fontWeight: FontWeight.bold)),
         actions: [
-          if (!_isLoading && _errorMessage == null)
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.green.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.green.withValues(alpha: 0.4)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.offline_pin_rounded, color: AppColors.green, size: 16),
-                  SizedBox(width: 4),
-                  Text('محفوظ أوفلاين', style: TextStyle(color: AppColors.green, fontSize: 11, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
           if (_totalPages > 0)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  '${_currentPage + 1} / $_totalPages',
-                  style: AppTextStyles.labelMedium.copyWith(color: AppColors.primary, fontWeight: FontWeight.bold),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Text(
+                    '$_currentPage / $_totalPages',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  ),
                 ),
               ),
             ),
@@ -133,51 +150,91 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const LoadingView(message: 'جاري فتح وتحميل ملف الـ PDF...');
+      return const LoadingView(message: 'جاري تحميل وتجهيز ملف الـ PDF...');
     }
 
     if (_errorMessage != null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 48),
-            const SizedBox(height: 12),
-            Text(_errorMessage!, style: AppTextStyles.bodyMedium),
-            const SizedBox(height: 14),
-            ElevatedButton(
-              onPressed: _downloadAndOpen,
-              child: const Text('إعادة المحاولة'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 48),
+              const SizedBox(height: 12),
+              Text(_errorMessage!, style: AppTextStyles.bodyMedium, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _initPdf,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('إعادة المحاولة'),
+              ),
+            ],
+          ),
         ),
       );
     }
 
-    if (_localFilePath == null) {
-      return const Center(child: Text('تعذر تحميل الملف'));
+    final params = PdfViewerParams(
+      margin: 8,
+      backgroundColor: AppColors.background,
+      onDocumentChanged: (document) {
+        if (mounted && document != null) {
+          setState(() {
+            _totalPages = document.pages.length;
+          });
+        }
+      },
+      onPageChanged: (pageNumber) {
+        if (mounted && pageNumber != null) {
+          setState(() {
+            _currentPage = pageNumber;
+          });
+        }
+      },
+      loadingBannerBuilder: (context, bytesDownloaded, totalBytes) {
+        return const Center(
+          child: LoadingView(message: 'جاري عرض صفحات الـ PDF...'),
+        );
+      },
+      errorBannerBuilder: (context, error, stackTrace, documentRef) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.broken_image_outlined, color: AppColors.red, size: 40),
+                const SizedBox(height: 10),
+                Text('تعذر عرض الـ PDF: $error', style: const TextStyle(color: AppColors.red), textAlign: TextAlign.center),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: _initPdf,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('إعادة المحاولة'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    // If we have a local file path (Mobile / Desktop)
+    if (_localFilePath != null) {
+      return PdfViewer.file(
+        _localFilePath!,
+        controller: _controller,
+        params: params,
+      );
     }
 
-    return PDFView(
-      filePath: _localFilePath!,
-      enableSwipe: true,
-      swipeHorizontal: false,
-      autoSpacing: true,
-      pageFling: true,
-      pageSnap: true,
-      backgroundColor: AppColors.background,
-      onRender: (pages) {
-        setState(() => _totalPages = pages ?? 0);
-      },
-      onPageChanged: (page, total) {
-        setState(() {
-          _currentPage = page ?? 0;
-          _totalPages = total ?? 0;
-        });
-      },
-      onError: (error) {
-        setState(() => _errorMessage = error.toString());
-      },
+    // Direct Uri fallback (Web / Online)
+    return PdfViewer.uri(
+      Uri.parse(widget.url),
+      controller: _controller,
+      params: params,
     );
   }
 }
+

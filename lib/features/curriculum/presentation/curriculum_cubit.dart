@@ -95,4 +95,25 @@ class CurriculumCubit extends Cubit<CurriculumState> {
 
   Future<List<LessonFileModel>> getOfflineDownloadedFiles({String? gradeId}) =>
       _repository.getOfflineDownloadedFiles(gradeId: gradeId ?? _currentGradeId);
+
+  Future<String?> getStudentAnnotatedFilePath(String fileName, {String? gradeId}) =>
+      _repository.getStudentAnnotatedFilePath(fileName, gradeId: gradeId ?? _currentGradeId);
+
+  Future<bool> hasStudentAnnotations(String fileName, {String? gradeId}) =>
+      _repository.hasStudentAnnotations(fileName, gradeId: gradeId ?? _currentGradeId);
+
+  Future<String> saveStudentAnnotatedPdf(String fileName, List<int> bytes, {String? gradeId}) =>
+      _repository.saveStudentAnnotatedPdf(fileName, bytes, gradeId: gradeId ?? _currentGradeId);
+
+  Future<bool> deleteStudentAnnotatedPdf(String fileName, {String? gradeId}) =>
+      _repository.deleteStudentAnnotatedPdf(fileName, gradeId: gradeId ?? _currentGradeId);
+
+  Future<String?> getStudentNotesJson(String fileName, {String? gradeId}) =>
+      _repository.getStudentNotesJson(fileName, gradeId: gradeId ?? _currentGradeId);
+
+  Future<void> saveStudentNotesJson(String fileName, String jsonData, {String? gradeId}) =>
+      _repository.saveStudentNotesJson(fileName, jsonData, gradeId: gradeId ?? _currentGradeId);
+
+  Future<bool> deleteStudentNotesJson(String fileName, {String? gradeId}) =>
+      _repository.deleteStudentNotesJson(fileName, gradeId: gradeId ?? _currentGradeId);
 }

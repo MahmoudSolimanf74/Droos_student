@@ -421,9 +421,16 @@ class AuthRepositoryImpl implements AuthRepository {
 
       // 2. Fallback to Supabase OAuth (Web/Browser) if native sign-in didn't complete
       if (!nativeSuccess && _client.auth.currentUser == null) {
+        final redirectUrl = kIsWeb
+            ? (Uri.base.origin.contains('localhost')
+                ? Uri.base.origin
+                : '${Uri.base.origin}/Droos_student/')
+            : 'io.supabase.student://login-callback';
+
         await _client.auth.signInWithOAuth(
           OAuthProvider.google,
-          redirectTo: kIsWeb ? null : 'io.supabase.student://login-callback',
+          redirectTo: redirectUrl,
+          authScreenLaunchMode: LaunchMode.externalApplication,
         );
       }
 

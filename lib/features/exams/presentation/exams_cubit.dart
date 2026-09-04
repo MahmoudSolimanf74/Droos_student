@@ -93,6 +93,41 @@ class ExamsCubit extends Cubit<ExamsState> {
     } catch (_) {}
   }
 
+  Future<void> deleteAttempt(Map<String, dynamic> attempt) async {
+    try {
+      await _repository.deleteAttempt(attempt);
+      if (state is ExamsLoaded) {
+        final current = state as ExamsLoaded;
+        final attemptId = attempt['id']?.toString() ?? '';
+        final examId = attempt['exam_id']?.toString() ?? '';
+        final submittedAt = attempt['submitted_at']?.toString() ?? attempt['started_at']?.toString();
+
+        final updatedAttempts = current.attempts.where((a) {
+          final aId = a['id']?.toString() ?? '';
+          if (attemptId.isNotEmpty && aId == attemptId) return false;
+          final aExamId = a['exam_id']?.toString() ?? '';
+          final aTime = a['submitted_at']?.toString() ?? a['started_at']?.toString();
+          if (aExamId == examId && aTime != null && submittedAt != null) {
+            final t1 = DateTime.tryParse(aTime);
+            final t2 = DateTime.tryParse(submittedAt);
+            if (t1 != null && t2 != null && (t1.difference(t2).inSeconds).abs() < 10) {
+              return false;
+            }
+          }
+          return true;
+        }).toList();
+
+        emit(ExamsLoaded(
+          exams: current.exams,
+          offlineExams: current.offlineExams,
+          attempts: updatedAttempts,
+          downloadedExamIds: current.downloadedExamIds,
+          isOffline: current.isOffline,
+        ));
+      }
+    } catch (_) {}
+  }
+
   Future<void> startExam(ExamModel exam) async {
     emit(ExamsLoading());
     try {

@@ -12,6 +12,8 @@ import '../../features/exams/domain/exam_models.dart';
 import '../../features/exams/presentation/exams_list_screen.dart';
 import '../../features/exams/presentation/take_exam_screen.dart';
 import '../../features/exams/presentation/exam_result_screen.dart';
+import '../../features/exams/presentation/exam_preview_screen.dart';
+import '../../features/exams/presentation/exam_attempt_details_screen.dart';
 import '../../features/attendance/presentation/attendance_screen.dart';
 import '../../features/homework/presentation/homework_screen.dart';
 
@@ -95,6 +97,13 @@ class AppRouter {
           builder: (context, state) => const ExamsListScreen(),
         ),
         GoRoute(
+          path: '/exam-preview',
+          builder: (context, state) {
+            final exam = state.extra as ExamModel;
+            return ExamPreviewScreen(exam: exam);
+          },
+        ),
+        GoRoute(
           path: '/take-exam',
           builder: (context, state) {
             final exam = state.extra as ExamModel;
@@ -108,6 +117,16 @@ class AppRouter {
             return ExamResultScreen(
               exam: extra['exam'] as ExamModel,
               result: extra['result'] as ExamResultModel,
+            );
+          },
+        ),
+        GoRoute(
+          path: '/attempt-details',
+          builder: (context, state) {
+            final extra = state.extra as Map<String, dynamic>;
+            return ExamAttemptDetailsScreen(
+              attempt: extra['attempt'] as Map<String, dynamic>,
+              exam: extra['exam'] as ExamModel?,
             );
           },
         ),

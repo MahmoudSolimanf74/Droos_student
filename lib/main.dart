@@ -1,6 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
+import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:protocol_handler/protocol_handler.dart';
 import 'core/config/supabase_config.dart';
 import 'core/routing/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -17,6 +21,16 @@ import 'features/homework/presentation/homework_cubit.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Register Windows Desktop URL protocol for Deep Linking
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    try {
+      await protocolHandler.register('io.supabase.student');
+    } catch (e) {
+      debugPrint('ProtocolHandler registration error: $e');
+    }
+  }
+
   await SupabaseConfig.initialize();
 
   final authRepo = AuthRepositoryImpl();
@@ -27,6 +41,30 @@ void main() async {
 
   final authCubit = AuthCubit(authRepository: authRepo);
   authCubit.checkAuth();
+
+  // Listen to deep links (OAuth callbacks on Windows / Mobile)
+  if (!kIsWeb) {
+    final appLinks = AppLinks();
+    appLinks.uriLinkStream.listen((uri) async {
+      debugPrint('[AppLinks] Incoming URI: $uri');
+      if (uri.scheme == 'io.supabase.student' || uri.host == 'login-callback') {
+        try {
+          await SupabaseConfig.client.auth.getSessionFromUrl(uri);
+          authCubit.checkAuth();
+        } catch (e) {
+          debugPrint('[AppLinks] getSessionFromUrl error: $e');
+        }
+      }
+    });
+
+    try {
+      final initialUri = await appLinks.getInitialLink();
+      if (initialUri != null && (initialUri.scheme == 'io.supabase.student' || initialUri.host == 'login-callback')) {
+        await SupabaseConfig.client.auth.getSessionFromUrl(initialUri);
+        authCubit.checkAuth();
+      }
+    } catch (_) {}
+  }
 
   runApp(
     StudentApp(

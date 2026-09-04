@@ -18,6 +18,13 @@ abstract class CurriculumRepository {
   Future<bool> isFileDownloaded(String fileName, {String? gradeId});
   Future<String?> getLocalFilePath(String fileName, {String? gradeId});
   Future<List<LessonFileModel>> getOfflineDownloadedFiles({String? gradeId});
+  Future<String?> getStudentAnnotatedFilePath(String fileName, {String? gradeId});
+  Future<bool> hasStudentAnnotations(String fileName, {String? gradeId});
+  Future<String> saveStudentAnnotatedPdf(String fileName, List<int> bytes, {String? gradeId});
+  Future<bool> deleteStudentAnnotatedPdf(String fileName, {String? gradeId});
+  Future<String?> getStudentNotesJson(String fileName, {String? gradeId});
+  Future<void> saveStudentNotesJson(String fileName, String jsonData, {String? gradeId});
+  Future<bool> deleteStudentNotesJson(String fileName, {String? gradeId});
 }
 
 class CurriculumRepositoryImpl implements CurriculumRepository {
@@ -183,6 +190,7 @@ class CurriculumRepositoryImpl implements CurriculumRepository {
   }
 
   Future<String> _getOfflineDirectory([String? gradeId]) async {
+    if (kIsWeb) return '';
     final dir = await getApplicationDocumentsDirectory();
     final cleanGradeId = (gradeId != null && gradeId.isNotEmpty)
         ? gradeId.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
@@ -196,6 +204,7 @@ class CurriculumRepositoryImpl implements CurriculumRepository {
 
   @override
   Future<bool> isFileDownloaded(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return false;
     try {
       final basePath = await _getOfflineDirectory(gradeId);
       final sanitizedName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
@@ -214,6 +223,7 @@ class CurriculumRepositoryImpl implements CurriculumRepository {
 
   @override
   Future<String?> getLocalFilePath(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return null;
     try {
       final basePath = await _getOfflineDirectory(gradeId);
       final sanitizedName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
@@ -237,6 +247,9 @@ class CurriculumRepositoryImpl implements CurriculumRepository {
 
   @override
   Future<String> downloadPdf(String url, String fileName, {String? gradeId}) async {
+    if (kIsWeb) {
+      return url;
+    }
     try {
       final basePath = await _getOfflineDirectory(gradeId);
       final sanitizedName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
@@ -266,6 +279,7 @@ class CurriculumRepositoryImpl implements CurriculumRepository {
 
   @override
   Future<List<LessonFileModel>> getOfflineDownloadedFiles({String? gradeId}) async {
+    if (kIsWeb) return [];
     try {
       final basePath = await _getOfflineDirectory(gradeId);
       final dir = Directory(basePath);
@@ -296,6 +310,137 @@ class CurriculumRepositoryImpl implements CurriculumRepository {
     } catch (e) {
       debugPrint('[getOfflineDownloadedFiles] Error for grade $gradeId: $e');
       return [];
+    }
+  }
+
+  Future<String> _getStudentNotesDirectory([String? gradeId]) async {
+    if (kIsWeb) return '';
+    final dir = await getApplicationDocumentsDirectory();
+    final cleanGradeId = (gradeId != null && gradeId.isNotEmpty)
+        ? gradeId.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        : 'default';
+    final notesDir = Directory('${dir.path}/student_notes/$cleanGradeId');
+    if (!await notesDir.exists()) {
+      await notesDir.create(recursive: true);
+    }
+    return notesDir.path;
+  }
+
+  String _getAnnotatedFileName(String fileName) {
+    final cleanName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    if (cleanName.toLowerCase().endsWith('.pdf')) {
+      final base = cleanName.substring(0, cleanName.length - 4);
+      return '${base}_annotated.pdf';
+    }
+    return '${cleanName}_annotated.pdf';
+  }
+
+  @override
+  Future<String?> getStudentAnnotatedFilePath(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return null;
+    try {
+      final dir = await _getStudentNotesDirectory(gradeId);
+      final annotatedName = _getAnnotatedFileName(fileName);
+      final file = File('$dir/$annotatedName');
+      if (await file.exists() && await file.length() > 0) {
+        return file.path;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[getStudentAnnotatedFilePath] error: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> hasStudentAnnotations(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return false;
+    final path = await getStudentAnnotatedFilePath(fileName, gradeId: gradeId);
+    return path != null;
+  }
+
+  @override
+  Future<String> saveStudentAnnotatedPdf(String fileName, List<int> bytes, {String? gradeId}) async {
+    if (kIsWeb) return fileName;
+    final dir = await _getStudentNotesDirectory(gradeId);
+    final annotatedName = _getAnnotatedFileName(fileName);
+    final file = File('$dir/$annotatedName');
+    await file.writeAsBytes(bytes, flush: true);
+    debugPrint('[saveStudentAnnotatedPdf] Saved annotated PDF to: ${file.path}');
+    return file.path;
+  }
+
+  @override
+  Future<bool> deleteStudentAnnotatedPdf(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return false;
+    try {
+      final dir = await _getStudentNotesDirectory(gradeId);
+      final annotatedName = _getAnnotatedFileName(fileName);
+      final file = File('$dir/$annotatedName');
+      if (await file.exists()) {
+        await file.delete();
+        debugPrint('[deleteStudentAnnotatedPdf] Deleted annotated PDF: ${file.path}');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[deleteStudentAnnotatedPdf] error: $e');
+      return false;
+    }
+  }
+
+  String _getNotesJsonFileName(String fileName) {
+    final cleanName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    if (cleanName.toLowerCase().endsWith('.pdf')) {
+      final base = cleanName.substring(0, cleanName.length - 4);
+      return '${base}_drawings.json';
+    }
+    return '${cleanName}_drawings.json';
+  }
+
+  @override
+  Future<String?> getStudentNotesJson(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return null;
+    try {
+      final dir = await _getStudentNotesDirectory(gradeId);
+      final jsonName = _getNotesJsonFileName(fileName);
+      final file = File('$dir/$jsonName');
+      if (await file.exists() && await file.length() > 0) {
+        return await file.readAsString();
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[getStudentNotesJson] error: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<void> saveStudentNotesJson(String fileName, String jsonData, {String? gradeId}) async {
+    if (kIsWeb) return;
+    final dir = await _getStudentNotesDirectory(gradeId);
+    final jsonName = _getNotesJsonFileName(fileName);
+    final file = File('$dir/$jsonName');
+    await file.writeAsString(jsonData, flush: true);
+    debugPrint('[saveStudentNotesJson] Saved notes JSON to: ${file.path}');
+  }
+
+  @override
+  Future<bool> deleteStudentNotesJson(String fileName, {String? gradeId}) async {
+    if (kIsWeb) return false;
+    try {
+      final dir = await _getStudentNotesDirectory(gradeId);
+      final jsonName = _getNotesJsonFileName(fileName);
+      final file = File('$dir/$jsonName');
+      if (await file.exists()) {
+        await file.delete();
+        debugPrint('[deleteStudentNotesJson] Deleted notes JSON: ${file.path}');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[deleteStudentNotesJson] error: $e');
+      return false;
     }
   }
 }
