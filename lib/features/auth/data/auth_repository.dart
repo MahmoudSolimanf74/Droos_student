@@ -394,38 +394,43 @@ class AuthRepositoryImpl implements AuthRepository {
       String? googleDisplayName;
       String? googleEmail;
 
-      // 1. Try native Google Sign-in
-      try {
-        final googleUser = await _googleSignIn.signIn();
-        if (googleUser != null) {
-          googleDisplayName = googleUser.displayName;
-          googleEmail = googleUser.email;
-          final googleAuth = await googleUser.authentication;
-          final accessToken = googleAuth.accessToken;
-          final idToken = googleAuth.idToken;
+      // 1. Try native Google Sign-in on Mobile / Desktop
+      if (!kIsWeb) {
+        try {
+          final googleUser = await _googleSignIn.signIn();
+          if (googleUser != null) {
+            googleDisplayName = googleUser.displayName;
+            googleEmail = googleUser.email;
+            final googleAuth = await googleUser.authentication;
+            final accessToken = googleAuth.accessToken;
+            final idToken = googleAuth.idToken;
 
-          if (idToken != null && idToken.isNotEmpty) {
-            final res = await _client.auth.signInWithIdToken(
-              provider: OAuthProvider.google,
-              idToken: idToken,
-              accessToken: accessToken,
-            );
-            if (res.user != null) {
-              nativeSuccess = true;
+            if (idToken != null && idToken.isNotEmpty) {
+              final res = await _client.auth.signInWithIdToken(
+                provider: OAuthProvider.google,
+                idToken: idToken,
+                accessToken: accessToken,
+              );
+              if (res.user != null) {
+                nativeSuccess = true;
+              }
             }
           }
+        } catch (nativeErr) {
+          debugPrint('[signInWithGoogle] Native sign-in note: $nativeErr, trying OAuth browser flow...');
         }
-      } catch (nativeErr) {
-        debugPrint('[signInWithGoogle] Native sign-in note: $nativeErr, trying OAuth browser flow...');
       }
 
-      // 2. Fallback to Supabase OAuth (Web/Browser) if native sign-in didn't complete
+      // 2. Supabase OAuth (Web / Desktop fallback)
       if (!nativeSuccess && _client.auth.currentUser == null) {
+        final origin = kIsWeb ? Uri.base.origin.toLowerCase() : '';
         final redirectUrl = kIsWeb
-            ? (Uri.base.origin.contains('localhost')
-                ? Uri.base.origin
-                : '${Uri.base.origin}/Droos_student/')
+            ? (origin.contains('localhost')
+                ? origin
+                : '$origin/Droos_student/')
             : 'io.supabase.student://login-callback';
+
+        debugPrint('[signInWithGoogle] Web redirectUrl: $redirectUrl');
 
         await _client.auth.signInWithOAuth(
           OAuthProvider.google,
