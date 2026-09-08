@@ -155,6 +155,14 @@ class _ExamAttemptDetailsScreenState extends State<ExamAttemptDetailsScreen> {
       } catch (_) {}
     }
 
+    if (rawAnswers is Map) {
+      if (rawAnswers['breakdown'] is List) {
+        rawAnswers = rawAnswers['breakdown'];
+      } else if (rawAnswers['answers'] is List) {
+        rawAnswers = rawAnswers['answers'];
+      }
+    }
+
     List<Map<String, dynamic>> breakdownList = [];
     if (rawAnswers is List) {
       breakdownList = rawAnswers.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -177,14 +185,45 @@ class _ExamAttemptDetailsScreenState extends State<ExamAttemptDetailsScreen> {
         final qOptions = q.getMappedOptions(shuffle: false);
         final rawOptionsList = q.options;
 
-        // Lookup matching student breakdown item
+        // Lookup matching student breakdown item with Multi-tier matching
         Map<String, dynamic>? match;
+
+        // Tier 1: Exact ID / Key match
         for (final b in breakdownList) {
-          if (b['question_id']?.toString() == q.id) {
+          final bId = b['question_id']?.toString() ?? '';
+          final bKey = b['question_key']?.toString() ?? '';
+          if ((bId.isNotEmpty && bId == q.id) || (bKey.isNotEmpty && bKey == q.id)) {
             match = b;
             break;
           }
         }
+
+        // Tier 2: Normalized question text match
+        if (match == null) {
+          final normQText = _normalize(q.questionText);
+          if (normQText.isNotEmpty) {
+            for (final b in breakdownList) {
+              final bText = _normalize(b['question_text']);
+              if (bText.isNotEmpty && bText == normQText) {
+                match = b;
+                break;
+              }
+            }
+          }
+        }
+
+        // Tier 3: Question index match
+        if (match == null) {
+          for (final b in breakdownList) {
+            final bIdx = b['question_index'];
+            if (bIdx is int && (bIdx == i || bIdx == i + 1)) {
+              match = b;
+              break;
+            }
+          }
+        }
+
+        // Tier 4: Positional fallback
         if (match == null && i < breakdownList.length) {
           match = breakdownList[i];
         }

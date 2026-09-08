@@ -169,8 +169,13 @@ class ExamQuestionModel extends Equatable {
     final qText = json['question'] as String? ?? json['question_text'] as String? ?? '';
     final cAns = json['correct_answer'] as String? ?? json['answer'] as String? ?? json['correct_option'] as String?;
 
+    final rawId = json['id']?.toString() ?? json['question_id']?.toString() ?? '';
+    final validId = rawId.trim().isNotEmpty
+        ? rawId.trim()
+        : 'q_${qText.trim().hashCode.abs()}_${parsedOpts.length}';
+
     return ExamQuestionModel(
-      id: json['id']?.toString() ?? '',
+      id: validId,
       examId: json['exam_id']?.toString() ?? '',
       questionText: qText,
       options: parsedOpts,

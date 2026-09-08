@@ -96,12 +96,30 @@ class _ExamResultScreenState extends State<ExamResultScreen> {
         final rawOptionsList = q.options;
 
         Map<String, dynamic>? match;
+        // Tier 1: Match by question_id
         for (final b in breakdownList) {
-          if (b['question_id']?.toString() == q.id) {
+          final bId = b['question_id']?.toString().trim() ?? '';
+          if (bId.isNotEmpty && bId.toLowerCase() == q.id.trim().toLowerCase()) {
             match = b;
             break;
           }
         }
+
+        // Tier 2: Match by normalized question text
+        if (match == null) {
+          final normQ = _normalize(q.questionText);
+          if (normQ.isNotEmpty) {
+            for (final b in breakdownList) {
+              final bText = b['question_text']?.toString() ?? '';
+              if (bText.isNotEmpty && _normalize(bText) == normQ) {
+                match = b;
+                break;
+              }
+            }
+          }
+        }
+
+        // Tier 3: Positional fallback
         if (match == null && i < breakdownList.length) {
           match = breakdownList[i];
         }

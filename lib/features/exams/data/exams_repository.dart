@@ -229,20 +229,44 @@ class ExamsRepositoryImpl implements ExamsRepository {
 
       // If online, fetch from DB to get the most up-to-date questions
       try {
-        final questions = await _client
-            .from('exam_questions')
-            .select('*')
-            .eq('exam_id', examId);
-        final list = questions as List<dynamic>;
+        List<dynamic> questions;
+        try {
+          questions = await _client
+              .from('exam_questions')
+              .select('*')
+              .eq('exam_id', examId)
+              .order('sort_order', ascending: true);
+        } catch (_) {
+          questions = await _client
+              .from('exam_questions')
+              .select('*')
+              .eq('exam_id', examId);
+        }
+        final list = questions;
         if (list.isNotEmpty) {
-          qList = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          final dbList = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          // Merge: if local cache has correct_answers that DB query might have missed, preserve them
+          for (final dbQ in dbList) {
+            final cRaw = dbQ['correct_answer'] ?? dbQ['answer'] ?? dbQ['correct_option'];
+            if (cRaw == null || cRaw.toString().trim().isEmpty) {
+              final cachedMatch = qList.firstWhere(
+                (cq) => (cq['id'] != null && cq['id'].toString() == dbQ['id']?.toString()) ||
+                        (_normalize(cq['question']) == _normalize(dbQ['question'])),
+                orElse: () => {},
+              );
+              if (cachedMatch.isNotEmpty) {
+                dbQ['correct_answer'] = cachedMatch['correct_answer'] ?? cachedMatch['answer'] ?? cachedMatch['correct_option'];
+              }
+            }
+          }
+          qList = dbList;
           debugPrint('[submitExamAttempt] Loaded ${qList.length} questions from Supabase DB');
         }
       } catch (qErr) {
         debugPrint('[submitExamAttempt] load questions from DB note: $qErr');
       }
 
-      // Fallback: search by question IDs
+      // Fallback 1: search by question IDs
       if (qList.isEmpty && answers.isNotEmpty) {
         try {
           final qIds = answers
@@ -259,6 +283,17 @@ class ExamsRepositoryImpl implements ExamsRepository {
         } catch (qIdsErr) {
           debugPrint('[submitExamAttempt] fallback inFilter error: $qIdsErr');
         }
+      }
+
+      // Fallback 2: If questions list is still empty, reconstruct questions directly from answers payload
+      if (qList.isEmpty && answers.isNotEmpty) {
+        qList = answers.map((a) => <String, dynamic>{
+          'id': a['question_id']?.toString() ?? '',
+          'question': a['question_text']?.toString() ?? 'سؤال',
+          'options': a['options'] ?? [],
+          'correct_answer': '',
+        }).toList();
+        debugPrint('[submitExamAttempt] Reconstructed ${qList.length} questions directly from student answers');
       }
 
       int correctCount = 0;
@@ -278,8 +313,9 @@ class ExamsRepositoryImpl implements ExamsRepository {
         }
       } catch (_) {}
 
-      for (final q in qList) {
-        final qId = q['id']?.toString() ?? '';
+      for (int qIdx = 0; qIdx < qList.length; qIdx++) {
+        final q = qList[qIdx];
+        final qId = q['id']?.toString().trim() ?? '';
         final qText = q['question']?.toString() ?? q['question_text']?.toString() ?? 'سؤال';
         final correctRaw = q['correct_answer'] ?? q['answer'] ?? q['correct_option'];
         final optionsRaw = q['options'];
@@ -295,15 +331,65 @@ class ExamsRepositoryImpl implements ExamsRepository {
           } catch (_) {}
         }
 
-        // Lookup student answer
+        // Multi-tier student answer lookup:
+        // Tier 1: Question ID or Key match
+        // Tier 2: Normalized Question Text match
+        // Tier 3: Index match
+        // Tier 4: Option text similarity
         dynamic studentRaw;
         String? studentLetter;
-        for (final a in answers) {
-          if (a['question_id']?.toString() == qId) {
-            studentRaw = a['selected_option'];
-            studentLetter = a['selected_letter']?.toString();
-            break;
+        Map<String, dynamic>? matchedAnswer;
+
+        // Tier 1: Match by question_id or question_key
+        if (qId.isNotEmpty) {
+          for (final a in answers) {
+            final aId = a['question_id']?.toString().trim() ?? '';
+            final aKey = a['question_key']?.toString().trim() ?? '';
+            if (aId.toLowerCase() == qId.toLowerCase() || aKey.toLowerCase() == qId.toLowerCase()) {
+              matchedAnswer = a;
+              break;
+            }
           }
+        }
+
+        // Tier 2: Match by normalized question text
+        if (matchedAnswer == null) {
+          final normQ = _normalize(qText);
+          if (normQ.isNotEmpty) {
+            for (final a in answers) {
+              final aText = a['question_text']?.toString() ?? '';
+              if (aText.isNotEmpty && _normalize(aText) == normQ) {
+                matchedAnswer = a;
+                break;
+              }
+            }
+          }
+        }
+
+        // Tier 3: Match by question index
+        if (matchedAnswer == null) {
+          for (final a in answers) {
+            final aIdx = a['question_index'];
+            if (aIdx != null && (aIdx as num).toInt() == qIdx) {
+              matchedAnswer = a;
+              break;
+            }
+          }
+        }
+
+        // Tier 4: Fallback to positional order if answer count matches
+        if (matchedAnswer == null && qIdx < answers.length && answers.length == qList.length) {
+          final a = answers[qIdx];
+          // Ensure it's not already claimed by a different ID
+          final aId = a['question_id']?.toString().trim() ?? '';
+          if (aId.isEmpty || aId == qId) {
+            matchedAnswer = a;
+          }
+        }
+
+        if (matchedAnswer != null) {
+          studentRaw = matchedAnswer['selected_option'];
+          studentLetter = matchedAnswer['selected_letter']?.toString();
         }
 
         final isMatch = _checkAnswerMatch(
@@ -313,7 +399,7 @@ class ExamsRepositoryImpl implements ExamsRepository {
           optionsRaw: optionsRaw,
         );
 
-        debugPrint('[submitExamAttempt] Q: "$qText" | Correct: "$correctRaw" vs StudentLetter: "$studentLetter", StudentText: "$studentRaw" => Match: $isMatch');
+        debugPrint('[submitExamAttempt] Q$qIdx: "$qText" | Correct: "$correctRaw" vs StudentLetter: "$studentLetter", StudentText: "$studentRaw" => Match: $isMatch');
 
         if (isMatch) {
           correctCount++;
@@ -581,6 +667,25 @@ class ExamsRepositoryImpl implements ExamsRepository {
         final examId = map['exam_id']?.toString() ?? '';
         final timeStr = map['submitted_at']?.toString() ?? map['started_at']?.toString() ?? '';
 
+        // Unpack answers if stored as JSON string or nested in Supabase
+        dynamic ans = map['answers'] ?? map['breakdown'];
+        if (ans is String && ans.trim().isNotEmpty) {
+          try {
+            ans = jsonDecode(ans);
+          } catch (_) {}
+        }
+        if (ans is Map) {
+          if (ans['breakdown'] is List) {
+            ans = ans['breakdown'];
+          } else if (ans['answers'] is List) {
+            ans = ans['answers'];
+          }
+        }
+        if (ans is List && ans.isNotEmpty) {
+          map['answers'] = ans;
+          map['breakdown'] = ans;
+        }
+
         bool isDuplicate = false;
         for (final existing in combined) {
           if (id.isNotEmpty && existing['id']?.toString() == id) {
@@ -635,10 +740,14 @@ class ExamsRepositoryImpl implements ExamsRepository {
               final t2 = DateTime.tryParse(exTimeStr);
               if (t1 != null && t2 != null && (t1.difference(t2).inSeconds).abs() < 180) {
                 // If existing remote attempt doesn't have breakdown but local does, enrich existing!
-                if ((existing['breakdown'] == null || existing['breakdown'] is! List || (existing['breakdown'] as List).isEmpty) &&
-                    map['breakdown'] != null) {
+                final existingAnswers = existing['breakdown'] ?? existing['answers'];
+                final bool existingEmpty = existingAnswers == null ||
+                    (existingAnswers is List && existingAnswers.isEmpty) ||
+                    (existingAnswers is Map && existingAnswers.isEmpty);
+
+                if (existingEmpty && map['breakdown'] != null && map['breakdown'] is List && (map['breakdown'] as List).isNotEmpty) {
                   existing['breakdown'] = map['breakdown'];
-                  existing['answers'] = map['answers'];
+                  existing['answers'] = map['answers'] ?? map['breakdown'];
                 }
                 isAlreadyPresent = true;
                 break;
