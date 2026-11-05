@@ -4,6 +4,7 @@ import '../../features/auth/presentation/auth_cubit.dart';
 import '../../features/auth/presentation/auth_state.dart';
 import '../../features/auth/presentation/complete_profile_screen.dart';
 import '../../features/auth/presentation/join_group_screen.dart';
+import '../../features/auth/presentation/qr_scanner_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/curriculum/presentation/curriculum_screen.dart';
@@ -73,6 +74,10 @@ class AppRouter {
         GoRoute(
           path: '/join-group',
           builder: (context, state) => const JoinGroupScreen(),
+        ),
+        GoRoute(
+          path: '/qr-scanner',
+          builder: (context, state) => const QrScannerScreen(),
         ),
         GoRoute(
           path: '/dashboard',

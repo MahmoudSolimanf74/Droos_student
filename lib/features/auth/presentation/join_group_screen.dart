@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/join_code_helper.dart';
 import '../../../core/widgets/custom_button.dart';
 import '../../../core/widgets/custom_text_field.dart';
 import 'auth_cubit.dart';
 import 'auth_state.dart';
+import 'qr_scanner_screen.dart';
 
 class JoinGroupScreen extends StatefulWidget {
   const JoinGroupScreen({super.key});
@@ -28,31 +30,26 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
     super.dispose();
   }
 
-  String _extractJoinCode(String raw) {
-    var clean = raw.trim();
-    if (clean.contains('code=') || clean.contains('token=')) {
-      final uri = Uri.tryParse(clean);
-      if (uri != null) {
-        if (uri.queryParameters.containsKey('code')) {
-          return uri.queryParameters['code']!.trim();
-        }
-        if (uri.queryParameters.containsKey('token')) {
-          return uri.queryParameters['token']!.trim();
+  Future<void> _scanQrCode() async {
+    final scannedCode = await QrScannerScreen.open(context);
+    if (scannedCode != null && scannedCode.isNotEmpty) {
+      final cleanCode = JoinCodeHelper.extractCode(scannedCode);
+      if (cleanCode.isNotEmpty) {
+        setState(() {
+          _codeController.text = cleanCode;
+        });
+        if (mounted) {
+          _submitCode(cleanCode);
         }
       }
-      final matchCode = RegExp(r'code=([a-zA-Z0-9_\u0600-\u06FF-]+)').firstMatch(clean);
-      if (matchCode != null) return matchCode.group(1)!;
-      final matchToken = RegExp(r'token=([a-zA-Z0-9_\u0600-\u06FF-]+)').firstMatch(clean);
-      if (matchToken != null) return matchToken.group(1)!;
     }
-    return clean;
   }
 
   Future<void> _pasteFromClipboard() async {
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       if (data != null && data.text != null && data.text!.trim().isNotEmpty) {
-        final extracted = _extractJoinCode(data.text!);
+        final extracted = JoinCodeHelper.extractCode(data.text!);
         setState(() {
           _codeController.text = extracted;
         });
@@ -85,7 +82,7 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
 
   Future<void> _submitCode(String code) async {
     if (_isSubmitting || _isJoining) return;
-    final cleanCode = _extractJoinCode(code);
+    final cleanCode = JoinCodeHelper.extractCode(code);
     if (cleanCode.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -93,7 +90,7 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
             children: [
               Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
               SizedBox(width: 10),
-              Expanded(child: Text('يرجى إدخال كود المجموعة أولاً')),
+              Expanded(child: Text('يرجى إدخال أو مسح كود المجموعة أولاً')),
             ],
           ),
           backgroundColor: AppColors.red,
@@ -185,7 +182,7 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
           body: SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 440),
                   child: Column(
@@ -194,8 +191,8 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                       // Illustration / Icon Badge
                       Center(
                         child: Container(
-                          width: 84,
-                          height: 84,
+                          width: 80,
+                          height: 80,
                           decoration: BoxDecoration(
                             color: AppColors.primary.withValues(alpha: 0.12),
                             shape: BoxShape.circle,
@@ -206,12 +203,12 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                           ),
                           child: const Icon(
                             Icons.school_rounded,
-                            size: 42,
+                            size: 40,
                             color: AppColors.primary,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
 
                       // Welcome header
                       if (profile != null) ...[
@@ -220,14 +217,114 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                           textAlign: TextAlign.center,
                           style: AppTextStyles.displayMedium.copyWith(fontSize: 22),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                       ],
                       Text(
                         AppStrings.joinGroupSubtitle,
                         textAlign: TextAlign.center,
                         style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
                       ),
-                      const SizedBox(height: 36),
+                      const SizedBox(height: 28),
+
+                      // QR Scanner Primary Action Card
+                      Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppColors.primary.withValues(alpha: 0.15),
+                              AppColors.secondary.withValues(alpha: 0.08),
+                            ],
+                            begin: Alignment.topRight,
+                            end: Alignment.bottomLeft,
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: AppColors.primary.withValues(alpha: 0.35),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: _scanQrCode,
+                            borderRadius: BorderRadius.circular(18),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary,
+                                      borderRadius: BorderRadius.circular(14),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.primary.withValues(alpha: 0.35),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.qr_code_scanner_rounded,
+                                      color: Colors.black,
+                                      size: 26,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'مسح رمز QR بالكاميرا',
+                                          style: AppTextStyles.titleMedium.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'امسح الرمز من شاشة المعلم للانضمام الفوري',
+                                          style: AppTextStyles.bodySmall.copyWith(
+                                            color: AppColors.textSecondary,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.arrow_forward_ios_rounded,
+                                    color: AppColors.primary,
+                                    size: 16,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Divider "أو أدخل الكود يدوياً"
+                      Row(
+                        children: [
+                          const Expanded(child: Divider(color: AppColors.border)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            child: Text(
+                              'أو أدخل الكود يدوياً',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const Expanded(child: Divider(color: AppColors.border)),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
 
                       // Manual Code Input
                       CustomTextField(
@@ -235,13 +332,31 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                         label: AppStrings.groupCode,
                         hintText: 'مثال: A7B29F',
                         prefixIcon: Icons.vpn_key_outlined,
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.paste_rounded, color: AppColors.primary, size: 20),
-                          tooltip: 'لصق من الحافظة',
-                          onPressed: _pasteFromClipboard,
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.qr_code_scanner_rounded,
+                                color: AppColors.primary,
+                                size: 22,
+                              ),
+                              tooltip: 'مسح QR',
+                              onPressed: _scanQrCode,
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.paste_rounded,
+                                color: AppColors.textSecondary,
+                                size: 20,
+                              ),
+                              tooltip: 'لصق من الحافظة',
+                              onPressed: _pasteFromClipboard,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // Paste shortcut hint
                       Align(
@@ -264,7 +379,7 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                         isLoading: _isJoining,
                         onPressed: () => _submitCode(_codeController.text),
                       ),
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 28),
 
                       // Information Card
                       Container(
@@ -295,7 +410,7 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'كيف أحصل على الكود؟',
+                                    'كيف أحصل على الكود أو الـ QR؟',
                                     style: AppTextStyles.bodyMedium.copyWith(
                                       fontWeight: FontWeight.bold,
                                       color: Colors.white,
@@ -303,7 +418,7 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'يقوم المعلم بمشاركة كود المجموعة الخاص بك (المكون من 6 رموز). اطلب الكود من معلمك للانضمام فوراً.',
+                                    'يعرض المعلم رمز الـ QR أو كود المجموعة (المكون من 6 رموز) في الفصل أو عبر وسائل التواصل. امسح الرمز مباشرة أو اطلب الكود للانضمام.',
                                     style: AppTextStyles.bodySmall.copyWith(
                                       color: AppColors.textSecondary,
                                       height: 1.4,
@@ -326,4 +441,3 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
     );
   }
 }
-

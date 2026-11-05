@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../../features/auth/domain/student_profile_model.dart';
 import '../../features/auth/presentation/auth_cubit.dart';
 import '../../features/auth/presentation/auth_state.dart';
+import '../../features/auth/presentation/qr_scanner_screen.dart';
 
 class GroupSwitcherBottomSheet extends StatelessWidget {
   final ValueChanged<StudentGroupEnrollment>? onGroupSwitched;
@@ -206,25 +207,73 @@ class GroupSwitcherBottomSheet extends StatelessWidget {
                 const Divider(height: 1, color: AppColors.border),
                 const SizedBox(height: 14),
 
-                // Add Another Teacher / Group Action Button
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.surface,
-                    foregroundColor: AppColors.primary,
-                    elevation: 0,
-                    side: const BorderSide(color: AppColors.primary, width: 1.2),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
-                  label: const Text(
-                    '➕ إضافة معلم أو مجموعة أخرى',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    context.push('/join-group');
-                  },
+                // Add Another Teacher / Group Action Buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                          foregroundColor: AppColors.primary,
+                          elevation: 0,
+                          side: BorderSide(color: AppColors.primary.withValues(alpha: 0.5), width: 1.2),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                        label: const Text(
+                          'مسح كود QR',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          final scannedCode = await QrScannerScreen.open(context);
+                          if (scannedCode != null && scannedCode.isNotEmpty && context.mounted) {
+                            final res = await context.read<AuthCubit>().joinGroup(scannedCode);
+                            if (context.mounted) {
+                              if (res['success'] == true) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(res['message'] as String? ?? 'تم الانضمام للمجموعة بنجاح! 🎉'),
+                                    backgroundColor: AppColors.green,
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(res['message'] as String? ?? 'كود المجموعة غير صحيح'),
+                                    backgroundColor: AppColors.red,
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.surface,
+                          foregroundColor: AppColors.textPrimary,
+                          elevation: 0,
+                          side: const BorderSide(color: AppColors.border, width: 1.2),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.keyboard_alt_outlined, size: 20),
+                        label: const Text(
+                          'كتابة كود',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          context.push('/join-group');
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
