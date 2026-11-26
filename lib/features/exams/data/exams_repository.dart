@@ -73,22 +73,13 @@ class ExamsRepositoryImpl implements ExamsRepository {
   @override
   Future<List<ExamQuestionModel>> getExamQuestions(String examId) async {
     try {
-      List<dynamic> res;
-      try {
-        res = await _client
-            .from('exam_questions')
-            .select('id, exam_id, question, options, sort_order, correct_answer')
-            .eq('exam_id', examId)
-            .order('sort_order', ascending: true);
-      } catch (_) {
-        res = await _client
-            .from('exam_questions')
-            .select('*')
-            .eq('exam_id', examId)
-            .order('sort_order', ascending: true);
-      }
+      final res = await _client
+          .from('exam_questions')
+          .select('*')
+          .eq('exam_id', examId)
+          .order('sort_order', ascending: true);
 
-      final list = res.map((q) => ExamQuestionModel.fromJson(Map<String, dynamic>.from(q as Map))).toList();
+      final list = (res as List<dynamic>).map((q) => ExamQuestionModel.fromJson(Map<String, dynamic>.from(q as Map))).toList();
 
       // Cache questions (including correct answers) for offline exam access & offline grading
       try {
@@ -296,8 +287,9 @@ class ExamsRepositoryImpl implements ExamsRepository {
         debugPrint('[submitExamAttempt] Reconstructed ${qList.length} questions directly from student answers');
       }
 
-      int correctCount = 0;
-      final total = qList.isNotEmpty ? qList.length : answers.length;
+      double earnedPointsTotal = 0.0;
+      double maxPointsTotal = 0.0;
+      bool hasPendingReviewQuestions = false;
       final List<Map<String, dynamic>> breakdown = [];
 
       String studentFullName = user?.userMetadata?['name'] ?? user?.userMetadata?['full_name'] ?? '';
@@ -317,10 +309,16 @@ class ExamsRepositoryImpl implements ExamsRepository {
         final q = qList[qIdx];
         final qId = q['id']?.toString().trim() ?? '';
         final qText = q['question']?.toString() ?? q['question_text']?.toString() ?? 'سؤال';
+        final qTypeStr = q['type']?.toString();
+        final qType = QuestionType.fromString(qTypeStr);
+        final qPoints = (q['points'] as num?)?.toDouble() ?? 1.0;
+        maxPointsTotal += qPoints;
+
         final correctRaw = q['correct_answer'] ?? q['answer'] ?? q['correct_option'];
         final optionsRaw = q['options'];
+        final modelAnswer = q['model_answer']?.toString();
 
-        // Parse options list for display
+        // Parse options list
         List<String> options = [];
         if (optionsRaw is List) {
           options = optionsRaw.map((e) => e.toString().trim()).toList();
@@ -331,16 +329,18 @@ class ExamsRepositoryImpl implements ExamsRepository {
           } catch (_) {}
         }
 
-        // Multi-tier student answer lookup:
-        // Tier 1: Question ID or Key match
-        // Tier 2: Normalized Question Text match
-        // Tier 3: Index match
-        // Tier 4: Option text similarity
+        // Parse accepted answers
+        List<String> acceptedAnswers = [];
+        final rawAccepted = q['accepted_answers'];
+        if (rawAccepted is List) {
+          acceptedAnswers = rawAccepted.map((e) => e.toString().trim()).toList();
+        }
+
+        // Multi-tier student answer lookup
         dynamic studentRaw;
         String? studentLetter;
         Map<String, dynamic>? matchedAnswer;
 
-        // Tier 1: Match by question_id or question_key
         if (qId.isNotEmpty) {
           for (final a in answers) {
             final aId = a['question_id']?.toString().trim() ?? '';
@@ -352,7 +352,6 @@ class ExamsRepositoryImpl implements ExamsRepository {
           }
         }
 
-        // Tier 2: Match by normalized question text
         if (matchedAnswer == null) {
           final normQ = _normalize(qText);
           if (normQ.isNotEmpty) {
@@ -366,7 +365,6 @@ class ExamsRepositoryImpl implements ExamsRepository {
           }
         }
 
-        // Tier 3: Match by question index
         if (matchedAnswer == null) {
           for (final a in answers) {
             final aIdx = a['question_index'];
@@ -377,10 +375,8 @@ class ExamsRepositoryImpl implements ExamsRepository {
           }
         }
 
-        // Tier 4: Fallback to positional order if answer count matches
         if (matchedAnswer == null && qIdx < answers.length && answers.length == qList.length) {
           final a = answers[qIdx];
-          // Ensure it's not already claimed by a different ID
           final aId = a['question_id']?.toString().trim() ?? '';
           if (aId.isEmpty || aId == qId) {
             matchedAnswer = a;
@@ -388,37 +384,119 @@ class ExamsRepositoryImpl implements ExamsRepository {
         }
 
         if (matchedAnswer != null) {
-          studentRaw = matchedAnswer['selected_option'];
+          studentRaw = matchedAnswer['selected_option'] ??
+              matchedAnswer['student_text'] ??
+              matchedAnswer['answer'] ??
+              matchedAnswer['matched_pairs'];
           studentLetter = matchedAnswer['selected_letter']?.toString();
         }
 
-        final isMatch = _checkAnswerMatch(
-          correctRaw: correctRaw,
-          studentLetter: studentLetter,
-          studentRaw: studentRaw,
-          optionsRaw: optionsRaw,
-        );
-
-        debugPrint('[submitExamAttempt] Q$qIdx: "$qText" | Correct: "$correctRaw" vs StudentLetter: "$studentLetter", StudentText: "$studentRaw" => Match: $isMatch');
-
-        if (isMatch) {
-          correctCount++;
-        }
-
-        // Determine human-friendly display for the correct answer
+        bool? isMatch;
+        double pointsEarned = 0.0;
         String correctDisplay = correctRaw?.toString() ?? '';
-        final cLetter = _resolveLetter(correctRaw, options);
-        const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
-        if (letters.contains(cLetter)) {
-          final cIdx = letters.indexOf(cLetter);
-          if (cIdx >= 0 && cIdx < options.length) {
-            correctDisplay = '$cLetter - ${options[cIdx]}';
-          } else {
-            correctDisplay = cLetter;
-          }
+
+        // Auto-Grading per question type
+        switch (qType) {
+          case QuestionType.mcq:
+            isMatch = _checkAnswerMatch(
+              correctRaw: correctRaw,
+              studentLetter: studentLetter,
+              studentRaw: studentRaw,
+              optionsRaw: optionsRaw,
+            );
+            if (isMatch) pointsEarned = qPoints;
+
+            final cLetter = _resolveLetter(correctRaw, options);
+            const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+            if (letters.contains(cLetter)) {
+              final cIdx = letters.indexOf(cLetter);
+              if (cIdx >= 0 && cIdx < options.length) {
+                correctDisplay = '$cLetter - ${options[cIdx]}';
+              } else {
+                correctDisplay = cLetter;
+              }
+            }
+            break;
+
+          case QuestionType.trueFalse:
+            final sNorm = _normalize(studentRaw);
+            final cNorm = _normalize(correctRaw);
+            isMatch = (sNorm.isNotEmpty && cNorm.isNotEmpty && sNorm == cNorm);
+            if (isMatch) pointsEarned = qPoints;
+            correctDisplay = correctRaw?.toString() ?? '';
+            break;
+
+          case QuestionType.matching:
+            // Check student matched pairs against correct pairs
+            final correctPairs = <String, String>{};
+            final rawPairs = q['matching_pairs'];
+            if (rawPairs is List) {
+              for (final p in rawPairs) {
+                if (p is Map) {
+                  final l = _normalize(p['left']);
+                  final r = _normalize(p['right']);
+                  if (l.isNotEmpty) correctPairs[l] = r;
+                }
+              }
+            }
+
+            int matchedCorrect = 0;
+            if (studentRaw is List && correctPairs.isNotEmpty) {
+              for (final sp in studentRaw) {
+                if (sp is Map) {
+                  final sl = _normalize(sp['left']);
+                  final sr = _normalize(sp['right']);
+                  if (correctPairs[sl] == sr) {
+                    matchedCorrect++;
+                  }
+                }
+              }
+            }
+            if (correctPairs.isNotEmpty) {
+              pointsEarned = (matchedCorrect / correctPairs.length) * qPoints;
+              isMatch = matchedCorrect == correctPairs.length;
+            } else {
+              isMatch = false;
+            }
+            correctDisplay = 'توصيل العناصر المطابقة';
+            break;
+
+          case QuestionType.fillBlank:
+            final sNorm = _normalize(studentRaw);
+            final cNorm = _normalize(correctRaw);
+            final acceptedNorms = acceptedAnswers.map((a) => _normalize(a)).toList();
+            isMatch = sNorm.isNotEmpty && (sNorm == cNorm || acceptedNorms.contains(sNorm));
+            if (isMatch) pointsEarned = qPoints;
+            correctDisplay = correctRaw?.toString() ?? (acceptedAnswers.isNotEmpty ? acceptedAnswers.join(' / ') : '');
+            break;
+
+          case QuestionType.shortAnswer:
+            final sNorm = _normalize(studentRaw);
+            final cNorm = _normalize(correctRaw);
+            final acceptedNorms = acceptedAnswers.map((a) => _normalize(a)).toList();
+            if (acceptedNorms.isNotEmpty || cNorm.isNotEmpty) {
+              isMatch = sNorm.isNotEmpty && (sNorm == cNorm || acceptedNorms.contains(sNorm));
+              if (isMatch) pointsEarned = qPoints;
+            } else {
+              // No accepted answers given -> requires manual teacher review
+              isMatch = null;
+              hasPendingReviewQuestions = true;
+            }
+            correctDisplay = modelAnswer ?? correctRaw?.toString() ?? '';
+            break;
+
+          case QuestionType.essay:
+            // Essay question cannot be auto-graded; pending teacher review
+            isMatch = null;
+            pointsEarned = 0.0;
+            hasPendingReviewQuestions = true;
+            correctDisplay = modelAnswer ?? 'إجابة مقالية (تصحيح يدوي)';
+            break;
         }
 
-        String studentDisplay = studentRaw?.toString() ?? '';
+        earnedPointsTotal += pointsEarned;
+
+        String studentDisplay = studentRaw is List ? jsonEncode(studentRaw) : (studentRaw?.toString() ?? '');
         if (studentDisplay.isEmpty && studentLetter != null && studentLetter.isNotEmpty) {
           studentDisplay = studentLetter;
         }
@@ -429,21 +507,37 @@ class ExamsRepositoryImpl implements ExamsRepository {
         breakdown.add({
           'question_id': qId,
           'question_text': qText,
+          'type': qType.value,
           'options': options,
           'selected_option': studentDisplay,
           'selected_letter': studentLetter ?? '',
           'correct_answer': correctDisplay,
-          'correct_letter': cLetter,
+          'model_answer': modelAnswer,
           'is_correct': isMatch,
-          'points_earned': isMatch ? 1 : 0,
+          'points_earned': pointsEarned,
+          'max_points': qPoints,
           'student_name': studentFullName,
         });
       }
 
-      final score = total > 0 ? (correctCount / total) * 100 : 0.0;
-      final passed = score >= 50.0;
+      final double totalDenominator = maxPointsTotal > 0 ? maxPointsTotal : (qList.isNotEmpty ? qList.length.toDouble() : 100.0);
+      final double scorePercentage = (earnedPointsTotal / totalDenominator) * 100;
+      final bool passed = scorePercentage >= 50.0;
 
-      debugPrint('[submitExamAttempt] Final result: $correctCount / $total ($score%) - Passed: $passed');
+      // Check whether exam results are officially published
+      bool isPublished = false;
+      try {
+        final examRow = await _client.from('exams').select('is_published').eq('id', examId).maybeSingle();
+        if (examRow != null && examRow['is_published'] == true) {
+          isPublished = true;
+        }
+      } catch (_) {}
+
+      final String attemptStatus = hasPendingReviewQuestions ? 'submitted_pending_review' : 'graded';
+      final bool needsManualReview = hasPendingReviewQuestions;
+
+      final score = scorePercentage;
+      debugPrint('[submitExamAttempt] Final result: $earnedPointsTotal / $totalDenominator ($scorePercentage%) - Passed: $passed');
 
       final nowIso = DateTime.now().toIso8601String();
 
@@ -456,7 +550,10 @@ class ExamsRepositoryImpl implements ExamsRepository {
           'student_id': user?.id ?? '',
           'student_name': studentFullName,
           'score': score,
-          'total_score': 100.0,
+          'total_score': totalDenominator,
+          'status': attemptStatus,
+          'needs_manual_review': needsManualReview,
+          'is_published': isPublished,
           'started_at': nowIso,
           'submitted_at': nowIso,
           'breakdown': breakdown,
@@ -561,7 +658,9 @@ class ExamsRepositoryImpl implements ExamsRepository {
                 'exam_id': examId,
                 'student_id': sId,
                 'score': score,
-                'total_score': 100.0,
+                'total_score': totalDenominator,
+                'status': attemptStatus,
+                'needs_manual_review': needsManualReview,
                 'answers': breakdown,
                 'started_at': nowIso,
                 'submitted_at': nowIso,
@@ -580,7 +679,9 @@ class ExamsRepositoryImpl implements ExamsRepository {
                   'exam_id': examId,
                   'student_id': sId,
                   'score': score,
-                  'total_score': 100.0,
+                  'total_score': totalDenominator,
+                  'status': attemptStatus,
+                  'needs_manual_review': needsManualReview,
                   'started_at': nowIso,
                   'submitted_at': nowIso,
                 };
@@ -602,11 +703,13 @@ class ExamsRepositoryImpl implements ExamsRepository {
 
       return ExamResultModel(
         attemptId: examId,
-        earnedPoints: correctCount.toDouble(),
-        totalPoints: total.toDouble(),
+        earnedPoints: earnedPointsTotal,
+        totalPoints: totalDenominator,
         scorePercentage: score,
         passed: passed,
         passingScore: 50.0,
+        isPublished: isPublished,
+        status: attemptStatus,
         breakdown: breakdown,
       );
     } catch (e) {

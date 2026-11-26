@@ -216,11 +216,12 @@ class _ExamResultScreenState extends State<ExamResultScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isPublished = widget.result.isPublished;
     final isPassed = widget.result.passed;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('نتيجة الامتحان'),
+        title: Text(isPublished ? 'نتيجة الامتحان' : 'تسليم الامتحان'),
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
@@ -229,87 +230,158 @@ class _ExamResultScreenState extends State<ExamResultScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Score Banner Card
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      (isPassed ? AppColors.green : AppColors.red).withValues(alpha: 0.2),
-                      AppColors.surface,
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
+              if (!isPublished) ...[
+                // Pending Review Card (Requirement 4: تم تسليم الامتحان بنجاح، النتيجة في انتظار التصحيح)
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppColors.primary.withValues(alpha: 0.15),
+                        AppColors.surface,
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 1.5),
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isPassed ? AppColors.green : AppColors.red,
-                    width: 1.5,
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.green.withValues(alpha: 0.15),
+                        ),
+                        child: const Icon(
+                          Icons.mark_email_read_rounded,
+                          color: AppColors.green,
+                          size: 54,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'تم تسليم الامتحان بنجاح',
+                        style: AppTextStyles.titleMedium.copyWith(
+                          color: AppColors.green,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          'النتيجة في انتظار التصحيح والاعتماد ⏳',
+                          style: TextStyle(
+                            color: Colors.amber.shade900,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'تم تسجيل إجاباتك بنجاح. وفقاً لنظام الاختبارات، لا تظهر أي درجات جزئية أو إجابات نموذجية قبل قيام المعلم بمراجعة الامتحان واعتماد نتائجه ونشرها لجميع الطلاب.',
+                        style: AppTextStyles.bodyMedium.copyWith(
+                          color: AppColors.textSecondary,
+                          height: 1.5,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
                 ),
-                child: Column(
-                  children: [
-                    Icon(
-                      isPassed ? Icons.emoji_events_rounded : Icons.highlight_off_rounded,
+                const SizedBox(height: 24),
+              ] else ...[
+                // Score Banner Card (Shown ONLY when teacher published the exam results)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        (isPassed ? AppColors.green : AppColors.red).withValues(alpha: 0.2),
+                        AppColors.surface,
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
                       color: isPassed ? AppColors.green : AppColors.red,
-                      size: 56,
+                      width: 1.5,
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      isPassed ? 'مبروك! اجتزت الامتحان بنجاح 🎉' : 'للأسف لم تجتز الامتحان ⚠️',
-                      style: AppTextStyles.titleMedium.copyWith(
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(
+                        isPassed ? Icons.emoji_events_rounded : Icons.highlight_off_rounded,
                         color: isPassed ? AppColors.green : AppColors.red,
-                        fontWeight: FontWeight.w800,
+                        size: 56,
                       ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${widget.result.scorePercentage.toStringAsFixed(1)}%',
-                      style: AppTextStyles.displayLarge.copyWith(
-                        fontSize: 34,
-                        fontWeight: FontWeight.w900,
-                        color: isPassed ? AppColors.green : AppColors.red,
+                      const SizedBox(height: 10),
+                      Text(
+                        isPassed ? 'مبروك! اجتزت الامتحان بنجاح 🎉' : 'للأسف لم تجتز الامتحان ⚠️',
+                        style: AppTextStyles.titleMedium.copyWith(
+                          color: isPassed ? AppColors.green : AppColors.red,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'حصلت على ${widget.result.earnedPoints.toInt()} من أصل ${widget.result.totalPoints.toInt()} نقطة (درجة النجاح: ${widget.result.passingScore.toInt()}%)',
-                      style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
-                    ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${widget.result.scorePercentage.toStringAsFixed(1)}%',
+                        style: AppTextStyles.displayLarge.copyWith(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w900,
+                          color: isPassed ? AppColors.green : AppColors.red,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'حصلت على ${widget.result.earnedPoints.toInt()} من أصل ${widget.result.totalPoints.toInt()} نقطة (درجة النجاح: ${widget.result.passingScore.toInt()}%)',
+                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Breakdown Header
+                Row(
+                  children: [
+                    const Icon(Icons.quiz_outlined, size: 20, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Text('مراجعة الإجابات والحل النموذجي', style: AppTextStyles.titleMedium.copyWith(fontWeight: FontWeight.w700)),
                   ],
                 ),
-              ),
-              const SizedBox(height: 20),
+                const SizedBox(height: 12),
 
-              // Breakdown Header
-              Row(
-                children: [
-                  const Icon(Icons.quiz_outlined, size: 20, color: AppColors.primary),
-                  const SizedBox(width: 8),
-                  Text('مراجعة الإجابات والحل النموذجي', style: AppTextStyles.titleMedium.copyWith(fontWeight: FontWeight.w700)),
-                ],
-              ),
-              const SizedBox(height: 12),
+                // Questions List (Only shown when published)
+                FutureBuilder<List<ReviewQuestionItem>>(
+                  future: _reviewFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: LoadingView(message: 'جاري تحميل تفاصيل الأسئلة...'),
+                      );
+                    }
 
-              // Questions List
-              FutureBuilder<List<ReviewQuestionItem>>(
-                future: _reviewFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: LoadingView(message: 'جاري تحميل تفاصيل الأسئلة...'),
+                    final questions = snapshot.data ?? [];
+
+                    return Column(
+                      children: questions.map((item) => _buildReviewQuestionCard(item)).toList(),
                     );
-                  }
-
-                  final questions = snapshot.data ?? [];
-
-                  return Column(
-                    children: questions.map((item) => _buildReviewQuestionCard(item)).toList(),
-                  );
-                },
-              ),
+                  },
+                ),
+              ],
 
               const SizedBox(height: 16),
               CustomButton(
