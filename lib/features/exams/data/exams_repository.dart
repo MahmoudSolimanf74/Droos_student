@@ -462,31 +462,23 @@ class ExamsRepositoryImpl implements ExamsRepository {
             break;
 
           case QuestionType.fillBlank:
-            final sNorm = _normalize(studentRaw);
-            final cNorm = _normalize(correctRaw);
-            final acceptedNorms = acceptedAnswers.map((a) => _normalize(a)).toList();
-            isMatch = sNorm.isNotEmpty && (sNorm == cNorm || acceptedNorms.contains(sNorm));
-            if (isMatch) pointsEarned = qPoints;
+            // أكمل الفراغ: تصحيح يدوي دائماً - لا يتم التصحيح التلقائي
+            isMatch = null;
+            pointsEarned = 0.0;
+            hasPendingReviewQuestions = true;
             correctDisplay = correctRaw?.toString() ?? (acceptedAnswers.isNotEmpty ? acceptedAnswers.join(' / ') : '');
             break;
 
           case QuestionType.shortAnswer:
-            final sNorm = _normalize(studentRaw);
-            final cNorm = _normalize(correctRaw);
-            final acceptedNorms = acceptedAnswers.map((a) => _normalize(a)).toList();
-            if (acceptedNorms.isNotEmpty || cNorm.isNotEmpty) {
-              isMatch = sNorm.isNotEmpty && (sNorm == cNorm || acceptedNorms.contains(sNorm));
-              if (isMatch) pointsEarned = qPoints;
-            } else {
-              // No accepted answers given -> requires manual teacher review
-              isMatch = null;
-              hasPendingReviewQuestions = true;
-            }
+            // إجابة قصيرة: تصحيح يدوي دائماً - لا يتم التصحيح التلقائي
+            isMatch = null;
+            pointsEarned = 0.0;
+            hasPendingReviewQuestions = true;
             correctDisplay = modelAnswer ?? correctRaw?.toString() ?? '';
             break;
 
           case QuestionType.essay:
-            // Essay question cannot be auto-graded; pending teacher review
+            // سؤال مقالي: تصحيح يدوي دائماً
             isMatch = null;
             pointsEarned = 0.0;
             hasPendingReviewQuestions = true;
